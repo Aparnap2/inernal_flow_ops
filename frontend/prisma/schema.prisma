@@ -1,0 +1,338 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  role      UserRole @default(VIEWER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  approvals Approval[]
+  runs      Run[]     @relation("RunCreatedBy")
+
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+model Account {
+  id                String   @id @default(cuid())
+  hubspotId         String   @unique
+  name              String
+  domain            String?
+  industry          String?
+  employeeCount     Int?
+  annualRevenue     Decimal?
+  lifecycleStage    String?
+  lastModifiedDate  DateTime
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Metadata
+  properties        Json?
+  customFields      Json?
+  
+  // Relations
+  contacts          Contact[]
+  deals             Deal[]
+  runs              Run[]
+  
+  @@map("accounts")
+}
+
+model Contact {
+  id                String   @id @default(cuid())
+  hubspotId         String   @unique
+  email             String?
+  firstName         String?
+  lastName          String?
+  jobTitle          String?
+  phone             String?
+  lifecycleStage    String?
+  lastModifiedDate  DateTime
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  accountId         String?
+  account           Account? @relation(fields: [accountId], references: [id])
+  deals             Deal[]
+  runs              Run[]
+
+  // Metadata
+  properties        Json?
+  customFields      Json?
+
+  @@map("contacts")
+}
+
+model Deal {
+  id                String     @id @default(cuid())
+  hubspotId         String     @unique
+  name              String
+  stage              String
+  amount            Decimal?
+  closeDate         DateTime?
+  probability       Float?
+  lastModifiedDate  DateTime
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  // Relations
+  accountId         String?
+  account           Account?   @relation(fields: [accountId], references: [id])
+  contactId         String?
+  contact           Contact?   @relation(fields: [contactId], references: [id])
+  runs              Run[]
+
+  // Metadata
+  properties        Json?
+  customFields      Json?
+
+  @@map("deals")
+}
+
+model Run {
+  id                String      @id @default(cuid())
+  correlationId     String      @unique
+  workflowId        String
+  status            RunStatus   @default(PENDING)
+  startedAt         DateTime    @default(now())
+  completedAt       DateTime?
+  errorMessage      String?
+  
+  // Context
+  eventType         String
+  objectType        String
+  objectId          String
+  
+  // Relations
+  createdById       String?
+  createdBy         User?       @relation("RunCreatedBy", fields: [createdById], references: [id])
+  accountId         String?
+  account           Account?    @relation(fields: [accountId], references: [id])
+  contactId         String?
+  contact           Contact?    @relation(fields: [contactId], references: [id])
+  dealId            String?
+  deal              Deal?       @relation(fields: [dealId], references: [id])
+  
+  // Workflow data
+  steps             RunStep[]
+  approvals         Approval[]
+  exceptions        Exception[]
+  
+  // Metadata
+  payload           Json?
+  checkpointData    Json?
+  
+  @@map("runs")
+}
+
+enum RunStatus {
+  PENDING
+  RUNNING
+  WAITING_APPROVAL
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model RunStep {
+  id            String      @id @default(cuid())
+  runId         String
+  run           Run         @relation(fields: [runId], references: [id], onDelete: Cascade)
+  
+  stepName      String
+  status        StepStatus  @default(PENDING)
+  startedAt     DateTime    @default(now())
+  completedAt   DateTime?
+  errorMessage  String?
+  retryCount    Int         @default(0)
+  
+  // Step data
+  input         Json?
+  output        Json?
+  
+  @@map("run_steps")
+}
+
+enum StepStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+model Approval {
+  id              String        @id @default(cuid())
+  runId           String
+  run             Run           @relation(fields: [runId], references: [id], onDelete: Cascade)
+  
+  type            ApprovalType
+  status          ApprovalStatus @default(PENDING)
+  requestedAt     DateTime      @default(now())
+  respondedAt     DateTime?
+  
+  // Approval context
+  title           String
+  description     String?
+  riskLevel       RiskLevel     @default(LOW)
+  
+  // Policy context
+  policyId        String?
+  policySnapshot  Json?
+  
+  // Response
+  approverId      String?
+  approver        User?         @relation(fields: [approverId], references: [id])
+  decision        Boolean?
+  justification   String?
+  
+  // Metadata
+  metadata        Json?
+  
+  @@map("approvals")
+}
+
+enum ApprovalType {
+  PROCUREMENT
+  RISK_THRESHOLD
+  MANUAL_REVIEW
+  POLICY_EXCEPTION
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model Exception {
+  id              String          @id @default(cuid())
+  runId           String
+  run             Run             @relation(fields: [runId], references: [id], onDelete: Cascade)
+  
+  type            ExceptionType
+  status          ExceptionStatus @default(OPEN)
+  createdAt       DateTime        @default(now())
+  resolvedAt      DateTime?
+  
+  // Exception details
+  title           String
+  description     String
+  errorCode       String?
+  
+  // Resolution
+  resolutionType  ResolutionType?
+  resolutionData  Json?
+  resolvedById    String?
+  
+  // Metadata
+  metadata        Json?
+  
+  @@map("exceptions")
+}
+
+enum ExceptionType {
+  DATA_VALIDATION
+  INTEGRATION_ERROR
+  BUSINESS_RULE_VIOLATION
+  TIMEOUT
+  UNKNOWN
+}
+
+enum ExceptionStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  IGNORED
+}
+
+enum ResolutionType {
+  AUTO_REPAIR
+  MANUAL_FIX
+  IGNORE
+  ESCALATE
+}
+
+model Policy {
+  id              String    @id @default(cuid())
+  name            String
+  description     String?
+  version         String    @default("1.0")
+  isActive        Boolean   @default(true)
+  
+  // Policy rules
+  conditions      Json      // JSON schema for conditions
+  actions         Json      // JSON schema for actions
+  
+  // Temporal tracking
+  validFrom       DateTime  @default(now())
+  validTo         DateTime?
+  
+  // Metadata
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  createdById     String?
+  
+  @@map("policies")
+}
+
+model WebhookEvent {
+  id                String    @id @default(cuid())
+  hubspotEventId    String?   @unique
+  eventType         String
+  objectType        String
+  objectId          String
+  correlationId     String
+  
+  // Event data
+  payload           Json
+  signature         String?
+  
+  // Processing status
+  status            EventStatus @default(RECEIVED)
+  processedAt       DateTime?
+  errorMessage      String?
+  retryCount        Int         @default(0)
+  
+  // Timestamps
+  occurredAt        DateTime
+  receivedAt        DateTime    @default(now())
+  
+  @@map("webhook_events")
+}
+
+enum EventStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+  IGNORED
+}
